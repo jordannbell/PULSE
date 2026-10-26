@@ -1,0 +1,31 @@
+@using Pulse.Contracts
+
+@* One bar per day, oldest on the left. Hover a bar to read its day. The bars are decoration for screen
+   readers, which get a one-sentence summary instead. *@
+<div class="strip @(Compact ? "strip-compact" : "")" role="img" aria-label="@Fmt.StripSummary(History)">
+    @foreach (var day in History)
+    {
+        var tip = Fmt.DayTip(day);
+        <span class="day day-@day.Level" aria-hidden="true">
+            <span class="tip" role="presentation"><b>@tip.Title</b>@tip.Detail</span>
+        </span>
+    }
+</div>
+@if (ShowLegend && History.Count > 0)
+{
+    <div class="strip-legend" aria-hidden="true">
+        <span>il y a @History.Count jours</span>
+        <span>aujourd'hui</span>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<DayDto> History { get; set; } = [];
+
+    [Parameter]
+    public bool Compact { get; set; }
+
+    [Parameter]
+    public bool ShowLegend { get; set; } = true;
+}

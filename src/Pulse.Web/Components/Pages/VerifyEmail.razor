@@ -1,0 +1,58 @@
+@page "/verify-email"
+@inject PulseApiClient Api
+
+<PageTitle>Confirmation de l'adresse, Pulse</PageTitle>
+
+<section class="auth">
+    <h1>Confirmation de l'adresse</h1>
+
+    @switch (_state)
+    {
+        case State.Confirmed:
+            <p class="notice notice-ok" role="status">Votre adresse e-mail est confirmée. Vous recevrez les alertes par e-mail.</p>
+            <p class="auth-links"><a class="btn" href="/app">Aller au tableau de bord</a></p>
+            break;
+        case State.Invalid:
+            <p class="notice notice-error" role="alert">
+                Ce lien n'est pas valide ou a expiré. Connectez-vous : le tableau de bord permet de demander un nouveau lien.
+            </p>
+            <p class="auth-links"><a class="btn" href="/login?returnUrl=%2Fapp">Se connecter</a></p>
+            break;
+        default:
+            <p class="notice notice-error" role="alert">Le service ne répond pas pour le moment. Rechargez cette page dans un instant.</p>
+            break;
+    }
+</section>
+
+@code {
+    private enum State
+    {
+        Confirmed,
+        Invalid,
+        Unavailable,
+    }
+
+    private State _state = State.Invalid;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    public string? Token { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrEmpty(Token))
+        {
+            return;
+        }
+
+        var result = await Api.VerifyEmailAsync(Token, HttpContext.RequestAborted);
+        _state = result.Status switch
+        {
+            ApiStatus.Ok => State.Confirmed,
+            ApiStatus.Unavailable => State.Unavailable,
+            _ => State.Invalid,
+        };
+    }
+}

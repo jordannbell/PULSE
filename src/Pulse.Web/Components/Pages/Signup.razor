@@ -1,0 +1,97 @@
+@page "/signup"
+@inject PulseApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>Créer un compte, Pulse</PageTitle>
+
+<section class="auth">
+    <h1>Créer votre compte</h1>
+    <p class="muted">Gratuit, sans carte bancaire. Vous obtenez une page de statut publique et des alertes en quelques minutes.</p>
+
+    <EditForm Model="Model" FormName="signup" OnSubmit="SubmitAsync">
+        <div class="fields">
+            <div class="field">
+                <label for="email">Adresse e-mail</label>
+                <InputText id="email" type="email" @bind-Value="Model.Email" autocomplete="email" />
+                <FieldError Errors="_errors" Field="email" />
+            </div>
+            <div class="field">
+                <label for="password">Mot de passe</label>
+                <InputText id="password" type="password" @bind-Value="Model.Password" autocomplete="new-password" />
+                <span class="field-hint">10 caractères au minimum. Une phrase longue vaut mieux qu'un mot de passe compliqué.</span>
+                <FieldError Errors="_errors" Field="password" />
+            </div>
+            <div class="field">
+                <label for="organizationName">Nom de votre organisation</label>
+                <InputText id="organizationName" @bind-Value="Model.OrganizationName" maxlength="80" autocomplete="organization" />
+                <FieldError Errors="_errors" Field="organizationName" />
+            </div>
+            <div class="field">
+                <label for="slug">Adresse de votre page de statut</label>
+                <div class="slug-input">
+                    <span aria-hidden="true">/s/</span>
+                    <InputText id="slug" @bind-Value="Model.Slug" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" />
+                </div>
+                <span class="field-hint">Votre page sera <strong>@Authority/s/@(string.IsNullOrEmpty(Model.Slug) ? "votre-nom" : Model.Slug)</strong>. Lettres minuscules, chiffres et tirets ; elle ne pourra plus changer, pour que vos liens partagés restent valables.</span>
+                <FieldError Errors="_errors" Field="slug" />
+            </div>
+        </div>
+
+        @if (_problem is not null)
+        {
+            <p class="notice notice-error" role="alert">@_problem</p>
+        }
+
+        <p class="field-hint">En créant un compte, vous acceptez la <a href="/confidentialite">politique de confidentialité</a>.</p>
+        <button type="submit" class="btn btn-block">Créer mon compte</button>
+    </EditForm>
+
+    <p class="auth-links">Déjà un compte ? <a href="/login">Se connecter</a></p>
+</section>
+
+@code {
+    private IReadOnlyDictionary<string, string[]> _errors = new Dictionary<string, string[]>();
+    private string? _problem;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private SignUpModel Model { get; set; } = default!;
+
+    private string Authority => new Uri(Navigation.BaseUri).Authority;
+
+    protected override void OnInitialized() => Model ??= new();
+
+    private async Task SubmitAsync()
+    {
+        var result = await Api.SignUpAsync(new SignUpRequest(Model.Email, Model.Password, Model.OrganizationName, Model.Slug), HttpContext.RequestAborted);
+        switch (result.Status)
+        {
+            case ApiStatus.Ok:
+                await ApiSession.SignInAsync(HttpContext, result.Value!);
+                Navigation.NavigateTo("/app?welcome=1");
+                break;
+            case ApiStatus.Invalid:
+                _errors = result.Errors ?? _errors;
+                break;
+            case ApiStatus.TooManyRequests:
+                _problem = "Trop de tentatives. Patientez une minute avant de réessayer.";
+                break;
+            default:
+                _problem = "Le service ne répond pas pour le moment. Réessayez dans un instant.";
+                break;
+        }
+    }
+
+    private sealed class SignUpModel
+    {
+        public string Email { get; set; } = string.Empty;
+
+        public string Password { get; set; } = string.Empty;
+
+        public string OrganizationName { get; set; } = string.Empty;
+
+        public string Slug { get; set; } = string.Empty;
+    }
+}

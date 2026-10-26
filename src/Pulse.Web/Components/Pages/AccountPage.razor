@@ -1,0 +1,267 @@
+@page "/app/account"
+@attribute [Authorize]
+@rendermode RenderModes.InteractiveNoPrerender
+@implements IDisposable
+@inject PulseApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>Compte, Pulse</PageTitle>
+
+<div class="content-narrow">
+    <h1>Mon compte</h1>
+
+    @if (_account is null)
+    {
+        <div class="skeleton" style="height: 120px; margin-top: 1.5rem" aria-hidden="true"></div>
+        <p class="sr-only" role="status">Chargement du compte.</p>
+    }
+    else
+    {
+        <section class="panel block" aria-labelledby="profile-title">
+            <h2 id="profile-title">Organisation</h2>
+            <dl class="facts facts-2">
+                <div class="fact"><dt>Adresse e-mail</dt><dd>@_account.Email @(_account.EmailVerified ? "" : "(non confirmée)")</dd></div>
+                <div class="fact"><dt>Votre page de statut</dt><dd><a href="/s/@_account.Slug">@Authority/s/@_account.Slug</a></dd></div>
+            </dl>
+            <EditForm Model="_nameForm" OnSubmit="RenameAsync" FormName="rename">
+                <div class="field">
+                    <label for="org-name">Nom de l'organisation</label>
+                    <InputText id="org-name" @bind-Value="_nameForm.Name" maxlength="80" autocomplete="organization" />
+                    <FieldError Errors="_nameErrors" Field="name" />
+                </div>
+                <button type="submit" class="btn btn-small" disabled="@_busy">Enregistrer le nom</button>
+            </EditForm>
+        </section>
+
+        <section class="panel block" aria-labelledby="plan-title">
+            <h2 id="plan-title">Formule</h2>
+            <p>Vous êtes sur la formule <strong>@(_account.Plan == PlanTier.Pro ? "Pro" : "Gratuite")</strong>.</p>
+            <div class="meters">
+                <div class="meter">
+                    <span>Services : @_account.Usage.ServicesUsed sur @_account.Usage.ServicesLimit</span>
+                    <progress max="@_account.Usage.ServicesLimit" value="@_account.Usage.ServicesUsed"></progress>
+                </div>
+                <div class="meter">
+                    <span>Webhooks : @_account.Usage.WebhooksUsed sur @_account.Usage.WebhooksLimit</span>
+                    <progress max="@_account.Usage.WebhooksLimit" value="@_account.Usage.WebhooksUsed"></progress>
+                </div>
+            </div>
+            <p class="muted">Contrôle le plus fréquent : toutes les @Fmt.Duration(TimeSpan.FromSeconds(_account.Usage.MinIntervalSeconds)).</p>
+
+            @if (_account.CanChangePlan)
+            {
+                @if (_account.Plan == PlanTier.Free)
+                {
+                    <p class="notice notice-info">
+                        <strong>Pro : 50 services, un contrôle toutes les 30 secondes, 5 webhooks.</strong>
+                        Gratuite pendant la bêta, sans paiement.
+                    </p>
+                    <button type="button" class="btn btn-small" @onclick="() => ChangePlanAsync(PlanTier.Pro)" disabled="@_busy">Passer à la formule Pro</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-quiet btn-small" @onclick="() => ChangePlanAsync(PlanTier.Free)" disabled="@_busy">Revenir à la formule Gratuite</button>
+                }
+
+                @if (_planError is not null)
+                {
+                    <p class="field-error" role="alert">@_planError</p>
+                }
+            }
+        </section>
+
+        <section class="panel block" aria-labelledby="password-title">
+            <h2 id="password-title">Mot de passe</h2>
+            <EditForm Model="_passwordForm" OnSubmit="ChangePasswordAsync" FormName="change-password">
+                <div class="fields fields-2">
+                    <div class="field">
+                        <label for="current-password">Mot de passe actuel</label>
+                        <InputText id="current-password" type="password" @bind-Value="_passwordForm.Current" autocomplete="current-password" />
+                        <FieldError Errors="_passwordErrors" Field="currentPassword" />
+                    </div>
+                    <div class="field">
+                        <label for="new-password">Nouveau mot de passe</label>
+                        <InputText id="new-password" type="password" @bind-Value="_passwordForm.New" autocomplete="new-password" />
+                        <span class="field-hint">10 caractères au minimum.</span>
+                        <FieldError Errors="_passwordErrors" Field="newPassword" />
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-small" disabled="@_busy">Changer le mot de passe</button>
+                <p class="field-hint">Vos autres sessions seront fermées.</p>
+            </EditForm>
+        </section>
+
+        <section class="panel block danger-zone" aria-labelledby="delete-title">
+            <h2 id="delete-title">Supprimer mon compte</h2>
+            <p>
+                Cette action efface <strong>immédiatement et définitivement</strong> votre organisation, vos services,
+                tout leur historique, vos webhooks et votre page de statut publique. Elle ne peut pas être annulée.
+            </p>
+            @if (!_confirmingDelete)
+            {
+                <button type="button" class="btn btn-danger btn-small" @onclick="() => _confirmingDelete = true">Supprimer mon compte</button>
+            }
+            else
+            {
+                <EditForm Model="_deleteForm" OnSubmit="DeleteAsync" FormName="delete-account">
+                    <div class="field">
+                        <label for="delete-password">Saisissez votre mot de passe pour confirmer</label>
+                        <InputText id="delete-password" type="password" @bind-Value="_deleteForm.Password" autocomplete="current-password" />
+                        <FieldError Errors="_deleteErrors" Field="password" />
+                    </div>
+                    <div class="admin-actions">
+                        <button type="submit" class="btn btn-danger-solid btn-small" disabled="@_busy">Oui, tout supprimer</button>
+                        <button type="button" class="btn btn-quiet btn-small" @onclick="() => _confirmingDelete = false" disabled="@_busy">Annuler</button>
+                    </div>
+                </EditForm>
+            }
+        </section>
+    }
+</div>
+
+<Toast State="_toast" />
+
+@code {
+    private readonly ToastState _toast;
+    private readonly NameForm _nameForm = new();
+    private readonly PasswordForm _passwordForm = new();
+    private readonly DeleteForm _deleteForm = new();
+    private AccountDto? _account;
+    private IReadOnlyDictionary<string, string[]> _nameErrors = new Dictionary<string, string[]>();
+    private IReadOnlyDictionary<string, string[]> _passwordErrors = new Dictionary<string, string[]>();
+    private IReadOnlyDictionary<string, string[]> _deleteErrors = new Dictionary<string, string[]>();
+    private string? _planError;
+    private bool _confirmingDelete;
+    private bool _busy;
+
+    public AccountPage() => _toast = new ToastState(() => InvokeAsync(StateHasChanged));
+
+    private string Authority => new Uri(Navigation.BaseUri).Authority;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Api.GetAccountAsync(CancellationToken.None);
+        if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+            return;
+        }
+
+        _account = result.Value;
+        _nameForm.Name = _account?.OrganizationName ?? string.Empty;
+    }
+
+    private async Task RenameAsync()
+    {
+        _busy = true;
+        _nameErrors = new Dictionary<string, string[]>();
+        var result = await Api.UpdateOrganizationAsync(_nameForm.Name, CancellationToken.None);
+        _busy = false;
+        if (result.IsOk)
+        {
+            _account = result.Value;
+            _toast.Show("Le nom est enregistré.");
+        }
+        else if (result.Status == ApiStatus.Invalid)
+        {
+            _nameErrors = result.Errors ?? _nameErrors;
+        }
+        else if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+        }
+    }
+
+    private async Task ChangePlanAsync(PlanTier plan)
+    {
+        _busy = true;
+        _planError = null;
+        var result = await Api.ChangePlanAsync(plan, CancellationToken.None);
+        _busy = false;
+        if (result.IsOk)
+        {
+            _account = result.Value;
+            _toast.Show(plan == PlanTier.Pro ? "Vous êtes passé à la formule Pro." : "Vous êtes revenu à la formule Gratuite.");
+        }
+        else if (result.Status == ApiStatus.Invalid)
+        {
+            _planError = result.Error("plan");
+        }
+        else if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+        }
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        _busy = true;
+        _passwordErrors = new Dictionary<string, string[]>();
+        var result = await Api.ChangePasswordAsync(new ChangePasswordRequest(_passwordForm.Current, _passwordForm.New), CancellationToken.None);
+        _busy = false;
+        if (result.IsOk)
+        {
+            _passwordForm.Current = string.Empty;
+            _passwordForm.New = string.Empty;
+            _toast.Show("Votre mot de passe est changé. Vos autres sessions sont fermées.");
+        }
+        else if (result.Status == ApiStatus.Invalid)
+        {
+            _passwordErrors = result.Errors ?? _passwordErrors;
+        }
+        else if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+        }
+        else
+        {
+            _toast.Show("Le mot de passe n'a pas pu être changé. Réessayez.", isError: true);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _busy = true;
+        _deleteErrors = new Dictionary<string, string[]>();
+        var result = await Api.DeleteAccountAsync(_deleteForm.Password, CancellationToken.None);
+        _busy = false;
+        if (result.IsOk)
+        {
+            // The account is gone: leave through the page that also forgets the cookie.
+            Navigation.NavigateTo("/session-expired", forceLoad: true);
+        }
+        else if (result.Status == ApiStatus.Invalid)
+        {
+            _deleteErrors = result.Errors ?? _deleteErrors;
+        }
+        else if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+        }
+        else
+        {
+            _toast.Show("La suppression a échoué. Réessayez.", isError: true);
+        }
+    }
+
+    private void EndSession() => Navigation.NavigateTo("/session-expired", forceLoad: true);
+
+    public void Dispose() => _toast.Dispose();
+
+    private sealed class NameForm
+    {
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class PasswordForm
+    {
+        public string Current { get; set; } = string.Empty;
+
+        public string New { get; set; } = string.Empty;
+    }
+
+    private sealed class DeleteForm
+    {
+        public string Password { get; set; } = string.Empty;
+    }
+}

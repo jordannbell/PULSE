@@ -1,0 +1,50 @@
+@page "/confidentialite"
+
+<PageTitle>Politique de confidentialité, Pulse</PageTitle>
+
+<article class="content-narrow prose">
+    <h1>Politique de confidentialité</h1>
+    <p class="muted">Ce que Pulse collecte, pourquoi, combien de temps, et comment tout effacer.</p>
+
+    <h2>Ce que nous enregistrons</h2>
+    <ul>
+        <li><strong>Votre compte</strong> : adresse e-mail, nom de l'organisation, adresse de la page de statut, et un condensé (« hash ») de votre mot de passe. Votre mot de passe lui-même n'est jamais conservé ni lisible.</li>
+        <li><strong>Vos services surveillés</strong> : leur nom, leur adresse, les réglages de contrôle, et le résultat de chaque contrôle (heure, code de réponse, temps de réponse, message d'erreur).</li>
+        <li><strong>Vos webhooks</strong> : l'adresse que vous indiquez et une clé de signature, conservée chiffrée.</li>
+        <li><strong>Vos connexions</strong> : un identifiant de session (conservé sous forme de condensé) et ses dates. Les adresses IP servent uniquement à limiter le nombre de requêtes, en mémoire, et ne sont pas enregistrées.</li>
+    </ul>
+
+    <h2>Pourquoi</h2>
+    <p>Pour fournir le service : contrôler vos adresses, vous prévenir en cas de panne et publier votre page de statut. Rien n'est utilisé à des fins publicitaires, rien n'est vendu, et aucun outil de mesure d'audience ou de suivi n'est installé.</p>
+
+    <h2>Qui peut voir quoi</h2>
+    <ul>
+        <li>Votre <strong>page de statut publique</strong> montre le nom de votre organisation, l'état, l'historique et les incidents des services que vous choisissez d'afficher. Elle ne montre jamais les adresses surveillées.</li>
+        <li>Les services marqués <strong>privés</strong> ne figurent nulle part en public.</li>
+        <li>Chaque organisation ne voit que ses propres données.</li>
+        <li>Les e-mails (confirmation, alertes) sont envoyés par le serveur d'e-mail configuré par l'éditeur du service, uniquement à votre adresse confirmée.</li>
+    </ul>
+
+    <h2>Durées de conservation</h2>
+    <ul>
+        <li>Résultats de contrôle : 90 jours, puis supprimés automatiquement.</li>
+        <li>Sessions : 7 jours, ou jusqu'à votre déconnexion. Liens de confirmation et de réinitialisation : 24 heures et 1 heure.</li>
+        <li>Compte, services et webhooks : jusqu'à ce que vous les supprimiez.</li>
+    </ul>
+
+    <h2>Vos droits</h2>
+    <p>
+        Vous pouvez à tout moment modifier vos informations et <strong>supprimer votre compte</strong> depuis la page « Compte » :
+        l'organisation, les services, l'historique, les webhooks et les sessions sont alors effacés immédiatement et définitivement.
+        Pour toute autre demande (accès, rectification, portabilité), écrivez à l'éditeur du service : <em>[adresse de contact à compléter avant la mise en ligne]</em>.
+    </p>
+
+    <h2>Cookies et stockage local</h2>
+    <p>
+        Un seul cookie, strictement nécessaire : <code>pulse.session</code>, qui vous garde connecté. Il est chiffré, inaccessible au code de la page, et expire avec votre session.
+        Votre choix de thème (clair, sombre, automatique) est gardé dans le navigateur. Aucun autre cookie, donc aucun bandeau de consentement.
+    </p>
+
+    <h2>Éditeur</h2>
+    <p class="muted"><em>[Nom, adresse et contact de l'éditeur à compléter avant la mise en ligne]</em></p>
+</article>

@@ -1,0 +1,66 @@
+@inherits LayoutComponentBase
+
+<div class="shell">
+    <header class="topbar">
+        <a class="brand" href="/" aria-label="Pulse, accueil">
+            <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                <rect width="32" height="32" rx="8" fill="currentColor" />
+                <path d="M4 17h6l3-8 5 15 3-7h7" fill="none" stroke="var(--bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            Pulse
+        </a>
+
+        <nav aria-label="Navigation principale">
+            <AuthorizeView>
+                <Authorized>
+                    <NavLink href="/app" Match="NavLinkMatch.All">Tableau de bord</NavLink>
+                    <NavLink href="/app/alerts">Alertes</NavLink>
+                    <NavLink href="/app/account">Compte</NavLink>
+                    <a href="@("/s/" + context.User.FindFirst(ApiSession.SlugClaim)?.Value)">Ma page</a>
+                </Authorized>
+                <NotAuthorized>
+                    <NavLink href="/" Match="NavLinkMatch.All">Accueil</NavLink>
+                    <NavLink href="/s/demo">Exemple</NavLink>
+                    <NavLink href="/login">Connexion</NavLink>
+                </NotAuthorized>
+            </AuthorizeView>
+        </nav>
+
+        <div class="topbar-actions">
+            <AuthorizeView>
+                <Authorized>
+                    <form method="post" action="/logout">
+                        <button type="submit" class="icon-btn">Déconnexion</button>
+                    </form>
+                </Authorized>
+                <NotAuthorized>
+                    <a class="btn btn-small" href="/signup">Créer un compte</a>
+                </NotAuthorized>
+            </AuthorizeView>
+            <button type="button" class="icon-btn" data-theme-toggle title="Changer de thème (automatique, clair, sombre)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 3v18" />
+                    <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" />
+                </svg>
+                <span class="theme-label"></span>
+                <span class="sr-only">Changer de thème</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="content">
+        @Body
+    </main>
+
+    <footer class="footer">
+        <a href="/confidentialite">Confidentialité</a>
+        <span>Pulse, surveillance de disponibilité. Heures affichées en UTC.</span>
+    </footer>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Une erreur est survenue.
+    <a href="." class="reload">Recharger</a>
+    <span class="dismiss" aria-label="Fermer">×</span>
+</div>

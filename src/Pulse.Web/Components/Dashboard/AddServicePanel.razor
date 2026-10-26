@@ -1,0 +1,70 @@
+@inject PulseApiClient Api
+
+<section class="panel" aria-labelledby="add-title">
+    <h2 id="add-title">Ajouter un service</h2>
+    <EditForm Model="_form" OnSubmit="SubmitAsync" FormName="new-service">
+        <ServiceForm Model="_form" Errors="_errors" AskAddress="true" MinIntervalSeconds="MinIntervalSeconds" Prefix="add" />
+        <div class="admin-actions" style="margin-top: 1.1rem">
+            <button type="submit" class="btn" disabled="@_busy">@(_busy ? "Ajout en cours…" : "Ajouter le service")</button>
+            <button type="button" class="btn btn-quiet" @onclick="OnCancel" disabled="@_busy">Annuler</button>
+        </div>
+    </EditForm>
+</section>
+
+@code {
+    private readonly ServiceFormModel _form = new();
+    private IReadOnlyDictionary<string, string[]> _errors = new Dictionary<string, string[]>();
+    private bool _busy;
+
+    /// <summary>The fastest check the plan allows.</summary>
+    [Parameter]
+    public int MinIntervalSeconds { get; set; } = 300;
+
+    [Parameter]
+    public EventCallback<ServiceDto> OnCreated { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    [Parameter]
+    public EventCallback OnSessionEnded { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnProblem { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Start on the plan's fastest sensible frequency: 5 minutes on every plan.
+        _form.IntervalSeconds = Math.Max(300, MinIntervalSeconds);
+    }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _errors = new Dictionary<string, string[]>();
+        try
+        {
+            var request = new CreateServiceRequest(_form.Name, _form.Url, _form.IntervalSeconds, _form.TimeoutSeconds, _form.ExpectedStatusCode, _form.IsPublic);
+            var result = await Api.CreateServiceAsync(request, CancellationToken.None);
+            switch (result.Status)
+            {
+                case ApiStatus.Ok:
+                    await OnCreated.InvokeAsync(result.Value);
+                    break;
+                case ApiStatus.Invalid:
+                    _errors = result.Errors ?? _errors;
+                    break;
+                case ApiStatus.Unauthorized:
+                    await OnSessionEnded.InvokeAsync();
+                    break;
+                default:
+                    await OnProblem.InvokeAsync("L'ajout a échoué. Vérifiez la connexion à l'API et réessayez.");
+                    break;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

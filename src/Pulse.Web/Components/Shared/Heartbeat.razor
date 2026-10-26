@@ -1,0 +1,40 @@
+@using Pulse.Contracts
+
+@* The health of the whole system drawn as a pulse: regular when all is well, irregular when part of it
+   is down, a flat line when everything is. Decorative: the headline next to it says the same in words. *@
+<svg class="heartbeat heartbeat-@Css @(Animate ? "heartbeat-draw" : "")" viewBox="0 0 600 64" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+    <path d="@Path" pathLength="1" />
+</svg>
+
+@code {
+    // One beat is 127 units wide and starts and ends on the baseline (y = 32).
+    private const string Beat = "h24 l6 -8 l6 8 h14 l5 6 l7 -34 l9 54 l6 -26 h14 l8 -10 l8 10 h20";
+
+    private static readonly string Steady = "M0 32 " + string.Concat(Enumerable.Repeat(Beat, 4)) + " h92";
+
+    // Two normal beats, then a stretch of tremor, then one weak beat: something is wrong.
+    private static readonly string Irregular =
+        "M0 32 " + Beat + " " + Beat + " h18 l4 -10 l4 20 l4 -20 l4 20 l4 -10 h30 l6 -4 l6 4 h14 l5 6 l7 -18 l9 30 l6 -18 H600";
+
+    [Parameter, EditorRequired]
+    public OverallStatus Overall { get; set; }
+
+    /// <summary>Draws the line once when the page appears. Off where it would repeat (lists).</summary>
+    [Parameter]
+    public bool Animate { get; set; } = true;
+
+    private string Css => Overall switch
+    {
+        OverallStatus.Operational => "up",
+        OverallStatus.PartialOutage => "partial",
+        OverallStatus.MajorOutage => "down",
+        _ => "unknown",
+    };
+
+    private string Path => Overall switch
+    {
+        OverallStatus.Operational => Steady,
+        OverallStatus.PartialOutage => Irregular,
+        _ => "M0 32 H600",
+    };
+}

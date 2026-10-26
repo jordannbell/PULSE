@@ -1,0 +1,144 @@
+@page "/s/{Slug}"
+@inject PulseApiClient Api
+
+@if (_result is { IsOk: true, Value: { } shown })
+{
+    <PageTitle>@shown.OrganizationName, état des services</PageTitle>
+}
+else
+{
+    <PageTitle>État des services, Pulse</PageTitle>
+}
+
+<HeadContent>
+    <meta http-equiv="refresh" content="60" />
+</HeadContent>
+
+<div class="content-narrow">
+    @if (_result is null || _result.Status == ApiStatus.Unavailable)
+    {
+        <h1>État des services</h1>
+        <p class="notice notice-error block" role="alert">
+            Le statut n'est pas disponible pour le moment. La page se recharge toute seule toutes les minutes ; réessayez dans un instant.
+        </p>
+    }
+    else if (_result.Status == ApiStatus.NotFound || _result.Value is null)
+    {
+        <h1>Cette page de statut n'existe pas</h1>
+        <p class="muted">L'adresse « @Slug » ne correspond à aucune organisation. Vérifiez le lien, ou <a href="/signup">créez la vôtre</a>.</p>
+    }
+    else
+    {
+        var status = _result.Value;
+        <section class="overview" aria-live="polite">
+            <p class="muted org-name">@status.OrganizationName</p>
+            <Heartbeat Overall="status.Overall" />
+            <h1>@Headline(status.Overall)</h1>
+            <p class="muted">Mis à jour à <span class="num">@Fmt.TimeWithSeconds(status.GeneratedAt)</span>, actualisation automatique chaque minute.</p>
+            @if (status.IsDemo)
+            {
+                <p class="notice notice-info notice-demo">
+                    <strong>Données de démonstration.</strong>
+                    <span>L'historique et les incidents de cette page sont inventés pour montrer à quoi elle ressemble. <a href="/signup">Créer la vôtre</a>.</span>
+                </p>
+            }
+        </section>
+
+        <section class="block" aria-labelledby="services-title">
+            <h2 id="services-title">Services</h2>
+            @if (status.Services.Count == 0)
+            {
+                <p class="empty">Aucun service n'est affiché pour le moment.</p>
+            }
+            else
+            {
+                <ul class="services">
+                    @foreach (var service in status.Services)
+                    {
+                        <li class="service">
+                            <div class="service-head">
+                                <span class="service-name">@service.Name</span>
+                                <span class="service-figures">
+                                    @if (service.UptimePercent is { } uptime)
+                                    {
+                                        <span class="uptime">@Fmt.Percent(uptime)<small>sur @status.UptimeWindowDays jours</small></span>
+                                    }
+                                    <StatusLabel Status="service.Status" />
+                                </span>
+                            </div>
+                            <UptimeStrip History="service.History" />
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="block" aria-labelledby="incidents-title">
+            <h2 id="incidents-title">Incidents des @status.UptimeWindowDays derniers jours</h2>
+            @if (status.Incidents.Count == 0)
+            {
+                <p class="empty">Aucun incident. Tout a fonctionné sans interruption.</p>
+            }
+            else
+            {
+                @foreach (var group in status.Incidents.GroupBy(i => DateOnly.FromDateTime(i.StartedAt.UtcDateTime)).OrderByDescending(g => g.Key))
+                {
+                    <div class="timeline-day">
+                        <h3>@Fmt.LongDate(group.Key)</h3>
+                        <ul class="timeline">
+                            @foreach (var incident in group.OrderByDescending(i => i.StartedAt))
+                            {
+                                <li class="incident">
+                                    <div class="incident-head">
+                                        <strong>@incident.ServiceName</strong>
+                                        @if (incident.ResolvedAt is { } end)
+                                        {
+                                            <span class="chip chip-up">Résolu en @Fmt.Duration(end - incident.StartedAt)</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="chip chip-down">En cours depuis @Fmt.Duration(status.GeneratedAt - incident.StartedAt)</span>
+                                        }
+                                        <span class="muted num">@Fmt.Time(incident.StartedAt)</span>
+                                    </div>
+                                    <p class="muted">@FrenchText.Cause(incident.Cause)</p>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                }
+            }
+        </section>
+
+        <p class="powered muted">Page de statut propulsée par <a href="/">Pulse</a>. <a href="/signup">Créer la vôtre</a>.</p>
+    }
+</div>
+
+@code {
+    private ApiResult<PublicStatusDto>? _result;
+
+    [Parameter]
+    public string Slug { get; set; } = string.Empty;
+
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _result = await Api.GetPublicStatusAsync(Slug, HttpContext?.RequestAborted ?? CancellationToken.None);
+
+        // A page that does not exist answers 404, so search engines and link checkers know too.
+        if (_result.Status == ApiStatus.NotFound && HttpContext is not null)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+        }
+    }
+
+    private static string Headline(OverallStatus overall) => overall switch
+    {
+        OverallStatus.Operational => "Tous les services fonctionnent",
+        OverallStatus.PartialOutage => "Une partie des services est en panne",
+        OverallStatus.MajorOutage => "Tous les services sont en panne",
+        _ => "En attente des premières mesures",
+    };
+}

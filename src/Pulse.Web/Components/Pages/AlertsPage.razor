@@ -1,0 +1,287 @@
+@page "/app/alerts"
+@attribute [Authorize]
+@rendermode RenderModes.InteractiveNoPrerender
+@implements IDisposable
+@inject PulseApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>Alertes, Pulse</PageTitle>
+
+<div class="content-narrow">
+    <h1>Alertes</h1>
+    <p class="muted">Une alerte part à l'ouverture d'un incident (après plusieurs échecs de suite) et une autre quand le service est rétabli. Jamais une alerte par contrôle.</p>
+
+    @if (_account is null)
+    {
+        <div class="skeleton" style="height: 120px; margin-top: 1.5rem" aria-hidden="true"></div>
+        <p class="sr-only" role="status">Chargement des alertes.</p>
+    }
+    else
+    {
+        <section class="panel block" aria-labelledby="email-title">
+            <h2 id="email-title">E-mail</h2>
+            @if (!_account.MailAvailable)
+            {
+                <p class="muted">Ce serveur n'envoie pas d'e-mails. Utilisez un webhook pour être prévenu.</p>
+            }
+            else
+            {
+                <p>Les alertes sont envoyées à <strong>@_account.Email</strong>.</p>
+                @if (!_account.EmailVerified)
+                {
+                    <p class="notice notice-info banner" role="status">
+                        <span>Cette adresse n'est pas encore confirmée : aucune alerte ne part tant qu'elle ne l'est pas.</span>
+                        <button type="button" class="btn btn-quiet btn-small" @onclick="ResendAsync" disabled="@_busy">Renvoyer le lien</button>
+                    </p>
+                }
+
+                <label class="check-line">
+                    <input type="checkbox" checked="@_account.EmailAlerts" @onchange="e => ToggleEmailAsync((bool)e.Value!)" disabled="@_busy" />
+                    <span>Recevoir les alertes par e-mail</span>
+                </label>
+            }
+        </section>
+
+        <section class="panel block" aria-labelledby="webhook-title">
+            <h2 id="webhook-title">Webhooks</h2>
+            <p class="muted">
+                Pulse envoie un message signé à l'adresse que vous indiquez : Slack, Discord, ou votre propre application.
+                Formule @(_account.Plan == PlanTier.Pro ? "Pro" : "Gratuite") : @_account.Usage.WebhooksUsed sur @_account.Usage.WebhooksLimit.
+            </p>
+
+            @if (_created is { } created)
+            {
+                <div class="secret-box" role="status">
+                    <strong>Copiez cette clé de signature maintenant : elle ne sera plus jamais affichée.</strong>
+                    <code>@created.Secret</code>
+                    <details class="more">
+                        <summary>Comment vérifier la signature</summary>
+                        <p>
+                            Calculez <code>HMAC-SHA256(clé, horodatage + "." + corps)</code> en hexadécimal minuscule, avec l'en-tête
+                            <code>X-Pulse-Timestamp</code> et le corps brut de la requête, et comparez au résultat de l'en-tête
+                            <code>X-Pulse-Signature</code> (<code>sha256=…</code>). Refusez les requêtes de plus de 5 minutes.
+                        </p>
+                    </details>
+                    <button type="button" class="btn btn-quiet btn-small" @onclick="() => _created = null">J'ai copié la clé</button>
+                </div>
+            }
+
+            @if (_webhooks.Count > 0)
+            {
+                <ul class="webhooks">
+                    @foreach (var webhook in _webhooks)
+                    {
+                        <li>
+                            <div>
+                                <span class="webhook-url">@webhook.Url</span>
+                                <span class="muted">@FormatName(webhook.Format), ajouté le @Fmt.LongDate(webhook.CreatedAt)</span>
+                            </div>
+                            <button type="button" class="btn btn-danger btn-small" @onclick="() => DeleteAsync(webhook)" disabled="@_busy">Supprimer</button>
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (_account.Usage.WebhooksUsed < _account.Usage.WebhooksLimit)
+            {
+                <EditForm Model="_form" OnSubmit="AddAsync" FormName="new-webhook" class="webhook-form">
+                    <div class="fields fields-2">
+                        <div class="field">
+                            <label for="hook-url">Adresse du webhook</label>
+                            <InputText id="hook-url" @bind-Value="_form.Url" inputmode="url" placeholder="https://hooks.slack.com/services/…" autocomplete="off" />
+                            <FieldError Errors="_errors" Field="url" />
+                        </div>
+                        <div class="field">
+                            <label for="hook-format">Format du message</label>
+                            <InputSelect id="hook-format" @bind-Value="_form.Format">
+                                <option value="@AlertFormat.Json">JSON signé (le plus complet)</option>
+                                <option value="@AlertFormat.Slack">Slack</option>
+                                <option value="@AlertFormat.Discord">Discord</option>
+                            </InputSelect>
+                        </div>
+                    </div>
+                    <FieldError Errors="_errors" Field="webhook" />
+                    <button type="submit" class="btn btn-small" disabled="@_busy">Ajouter le webhook</button>
+                </EditForm>
+            }
+            else if (_account.CanChangePlan && _account.Plan == PlanTier.Free)
+            {
+                <p class="notice notice-info">Limite atteinte pour la formule Gratuite. <a href="/app/account">La formule Pro autorise 5 webhooks.</a></p>
+            }
+        </section>
+
+        <section class="panel block" aria-labelledby="test-title">
+            <h2 id="test-title">Tester</h2>
+            @if (_channels.Count == 0)
+            {
+                <p class="muted">Aucun canal n'est prêt : confirmez votre adresse e-mail ou ajoutez un webhook.</p>
+            }
+            else
+            {
+                <p>Prêts à recevoir : <strong>@string.Join(", ", _channels.Select(c => c.Name))</strong>.</p>
+                <button type="button" class="btn btn-quiet btn-small" @onclick="TestAsync" disabled="@_busy">Envoyer un message de test</button>
+            }
+
+            @if (_results is not null)
+            {
+                <ul class="test-results" role="status">
+                    @foreach (var result in _results)
+                    {
+                        <li class="notice @(result.Success ? "notice-ok" : "notice-error")">
+                            <strong>@result.Channel</strong> :
+                            @(result.Success ? "message envoyé." : "échec. " + FrenchText.Validation(result.Error))
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+</div>
+
+<Toast State="_toast" />
+
+@code {
+    private readonly ToastState _toast;
+    private readonly WebhookForm _form = new();
+    private AccountDto? _account;
+    private IReadOnlyList<WebhookDto> _webhooks = [];
+    private IReadOnlyList<AlertChannelDto> _channels = [];
+    private IReadOnlyList<AlertTestResultDto>? _results;
+    private IReadOnlyDictionary<string, string[]> _errors = new Dictionary<string, string[]>();
+    private CreatedWebhookDto? _created;
+    private bool _busy;
+
+    public AlertsPage() => _toast = new ToastState(() => InvokeAsync(StateHasChanged));
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var account = await Api.GetAccountAsync(CancellationToken.None);
+        var webhooks = await Api.ListWebhooksAsync(CancellationToken.None);
+        var channels = await Api.ListAlertChannelsAsync(CancellationToken.None);
+        if (account.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+            return;
+        }
+
+        if (account.IsOk)
+        {
+            _account = account.Value;
+            _webhooks = webhooks.Value ?? [];
+            _channels = channels.Value ?? [];
+        }
+        else
+        {
+            _toast.Show("Le service ne répond pas pour le moment. Réessayez dans un instant.", isError: true);
+        }
+    }
+
+    private async Task ToggleEmailAsync(bool enabled)
+    {
+        _busy = true;
+        var result = await Api.UpdateNotificationsAsync(enabled, CancellationToken.None);
+        _busy = false;
+        if (result.IsOk)
+        {
+            _account = result.Value;
+            _channels = (await Api.ListAlertChannelsAsync(CancellationToken.None)).Value ?? [];
+            _toast.Show(enabled ? "Les alertes par e-mail sont activées." : "Les alertes par e-mail sont désactivées.");
+        }
+        else if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+        }
+        else
+        {
+            _toast.Show("Le réglage n'a pas pu être enregistré.", isError: true);
+        }
+    }
+
+    private async Task ResendAsync()
+    {
+        _busy = true;
+        var result = await Api.ResendVerificationAsync(CancellationToken.None);
+        _busy = false;
+        _toast.Show(result.IsOk ? "Un nouveau lien vient d'être envoyé." : "Le lien n'a pas pu être envoyé.", isError: !result.IsOk);
+    }
+
+    private async Task AddAsync()
+    {
+        _busy = true;
+        _errors = new Dictionary<string, string[]>();
+        var result = await Api.CreateWebhookAsync(new CreateWebhookRequest(_form.Url, _form.Format), CancellationToken.None);
+        _busy = false;
+        switch (result.Status)
+        {
+            case ApiStatus.Ok:
+                _created = result.Value;
+                _form.Url = string.Empty;
+                await LoadAsync();
+                break;
+            case ApiStatus.Invalid:
+                _errors = result.Errors ?? _errors;
+                break;
+            case ApiStatus.Unauthorized:
+                EndSession();
+                break;
+            default:
+                _toast.Show("Le webhook n'a pas pu être ajouté. Réessayez.", isError: true);
+                break;
+        }
+    }
+
+    private async Task DeleteAsync(WebhookDto webhook)
+    {
+        _busy = true;
+        var result = await Api.DeleteWebhookAsync(webhook.Id, CancellationToken.None);
+        _busy = false;
+        if (result.IsOk)
+        {
+            _toast.Show("Le webhook est supprimé.");
+            await LoadAsync();
+        }
+        else
+        {
+            _toast.Show("La suppression a échoué.", isError: true);
+        }
+    }
+
+    private async Task TestAsync()
+    {
+        _busy = true;
+        var result = await Api.TestAlertsAsync(CancellationToken.None);
+        _busy = false;
+        if (result.IsOk)
+        {
+            _results = result.Value ?? [];
+        }
+        else if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+        }
+        else
+        {
+            _toast.Show("Le message de test n'a pas pu être envoyé.", isError: true);
+        }
+    }
+
+    private static string FormatName(AlertFormat format) => format switch
+    {
+        AlertFormat.Slack => "Slack",
+        AlertFormat.Discord => "Discord",
+        _ => "JSON signé",
+    };
+
+    private void EndSession() => Navigation.NavigateTo("/session-expired", forceLoad: true);
+
+    public void Dispose() => _toast.Dispose();
+
+    private sealed class WebhookForm
+    {
+        public string Url { get; set; } = string.Empty;
+
+        public AlertFormat Format { get; set; } = AlertFormat.Json;
+    }
+}

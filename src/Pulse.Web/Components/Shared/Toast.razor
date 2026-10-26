@@ -1,0 +1,12 @@
+@if (State.Text is { } text)
+{
+    <div class="toast @(State.IsError ? "toast-error" : "toast-ok")" role="status">
+        <span>@text</span>
+        <button type="button" aria-label="Fermer le message" @onclick="State.Dismiss">×</button>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public ToastState State { get; set; } = null!;
+}

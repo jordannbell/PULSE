@@ -1,0 +1,208 @@
+@page "/app"
+@attribute [Authorize]
+@rendermode RenderModes.InteractiveNoPrerender
+@implements IDisposable
+@inject PulseApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>Tableau de bord, Pulse</PageTitle>
+
+@if (_account is null)
+{
+    <h1 class="sr-only">Tableau de bord</h1>
+    <div class="rows" aria-hidden="true">
+        <div class="skeleton" style="height: 92px; margin: .6rem"></div>
+        <div class="skeleton" style="height: 92px; margin: .6rem"></div>
+    </div>
+    <p class="sr-only" role="status">Chargement du tableau de bord.</p>
+}
+else
+{
+    <div class="admin-head">
+        <div>
+            <h1>Mes services</h1>
+            <p class="summary" aria-live="polite">
+                <span class="state state-up"><span class="dot" aria-hidden="true"></span>@Count(ServiceStatus.Up) en ligne</span>
+                <span class="state @(Count(ServiceStatus.Down) > 0 ? "state-down" : "state-unknown")"><span class="dot" aria-hidden="true"></span>@Count(ServiceStatus.Down) en panne</span>
+                @if (Count(ServiceStatus.Unknown) > 0)
+                {
+                    <span class="state state-unknown"><span class="dot" aria-hidden="true"></span>@Count(ServiceStatus.Unknown) en attente</span>
+                }
+            </p>
+        </div>
+        <div class="admin-actions">
+            @if (!_adding)
+            {
+                <button type="button" class="btn" @onclick="() => _adding = true" disabled="@AtLimit">Ajouter un service</button>
+            }
+        </div>
+    </div>
+
+    @if (!_account.EmailVerified && _account.MailAvailable)
+    {
+        <p class="notice notice-info banner" role="status">
+            <span>Confirmez votre adresse (<strong>@_account.Email</strong>) pour recevoir les alertes par e-mail : un lien vous a été envoyé.</span>
+            <button type="button" class="btn btn-quiet btn-small" @onclick="ResendAsync" disabled="@_resending">@(_resending ? "Envoi…" : "Renvoyer le lien")</button>
+        </p>
+    }
+
+    @if (AtLimit)
+    {
+        <p class="notice notice-info banner" role="status">
+            <span>Vous utilisez les @_account.Usage.ServicesLimit services de la formule @PlanName(_account.Plan).</span>
+            @if (_account.CanChangePlan && _account.Plan == PlanTier.Free)
+            {
+                <a class="btn btn-quiet btn-small" href="/app/account">Voir la formule Pro</a>
+            }
+        </p>
+    }
+
+    @if (_adding)
+    {
+        <AddServicePanel MinIntervalSeconds="_account.Usage.MinIntervalSeconds"
+                         OnCreated="OnCreatedAsync" OnCancel="() => _adding = false"
+                         OnSessionEnded="EndSession" OnProblem="p => _toast.Show(p, isError: true)" />
+    }
+
+    @if (_services.Count == 0)
+    {
+        @if (!_adding)
+        {
+            <section class="panel onboarding" aria-labelledby="start-title">
+                <h2 id="start-title">@(Welcome is not null ? "Bienvenue dans Pulse." : "Aucun service pour l'instant.") Voici comment démarrer.</h2>
+                <ol class="steps">
+                    <li><strong>Ajoutez une adresse à surveiller</strong><span>Un site ou une API publique. Le premier contrôle part dans quelques secondes.</span></li>
+                    <li><strong>Choisissez comment être prévenu</strong><span>L'alerte par e-mail est prête dès que votre adresse est confirmée ; vous pouvez aussi brancher un <a href="/app/alerts">webhook</a>.</span></li>
+                    <li><strong>Partagez votre page de statut</strong><span>Elle est déjà en ligne : <a href="@PublicPath">@PublicUrl</a></span></li>
+                </ol>
+                <button type="button" class="btn" @onclick="() => _adding = true">Ajouter mon premier service</button>
+            </section>
+        }
+    }
+    else
+    {
+        <div class="workspace">
+            <ul class="rows" aria-label="Services surveillés">
+                @foreach (var service in _services)
+                {
+                    <li>
+                        <ServiceRow Service="service" Now="_now" Selected="service.Id == Selected?.Id" OnSelect="() => _selectedId = service.Id" />
+                    </li>
+                }
+            </ul>
+            @if (Selected is { } selected)
+            {
+                <ServiceDetail Service="selected" Now="_now" MinIntervalSeconds="_account.Usage.MinIntervalSeconds"
+                               OnChanged="OnChangedAsync" OnProblem="p => _toast.Show(p, isError: true)" OnSessionEnded="EndSession" />
+            }
+        </div>
+
+        <p class="muted public-link">
+            Votre page de statut publique : <a href="@PublicPath">@PublicUrl</a>
+            · @_account.Usage.ServicesUsed sur @_account.Usage.ServicesLimit services, formule @PlanName(_account.Plan)
+        </p>
+    }
+}
+
+<Toast State="_toast" />
+
+@code {
+    private static readonly TimeSpan RefreshEvery = TimeSpan.FromSeconds(10);
+
+    private readonly ToastState _toast;
+    private AccountDto? _account;
+    private IReadOnlyList<ServiceDto> _services = [];
+    private Guid? _selectedId;
+    private DateTimeOffset _now = DateTimeOffset.UtcNow;
+    private Timer? _refreshTimer;
+    private bool _adding;
+    private bool _resending;
+
+    public DashboardPage() => _toast = new ToastState(() => InvokeAsync(StateHasChanged));
+
+    [SupplyParameterFromQuery]
+    public string? Welcome { get; set; }
+
+    private ServiceDto? Selected => _services.FirstOrDefault(s => s.Id == _selectedId) ?? _services.FirstOrDefault();
+
+    private bool AtLimit => _account is { } a && a.Usage.ServicesUsed >= a.Usage.ServicesLimit;
+
+    private string PublicPath => $"/s/{_account!.Slug}";
+
+    private string PublicUrl => $"{new Uri(Navigation.BaseUri).Authority}/s/{_account!.Slug}";
+
+    private int Count(ServiceStatus status) => _services.Count(s => s.Status == status);
+
+    private static string PlanName(PlanTier plan) => plan == PlanTier.Pro ? "Pro" : "Gratuite";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _refreshTimer = new Timer(_ => _ = InvokeAsync(LoadAsync), null, RefreshEvery, RefreshEvery);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var account = await Api.GetAccountAsync(CancellationToken.None);
+        var services = await Api.ListServicesAsync(CancellationToken.None);
+        if (account.Status == ApiStatus.Unauthorized || services.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+            return;
+        }
+
+        if (account.IsOk && services.IsOk)
+        {
+            _account = account.Value;
+            _services = services.Value ?? [];
+            _now = DateTimeOffset.UtcNow;
+        }
+        else if (_account is null)
+        {
+            _toast.Show("Le service ne répond pas pour le moment. Réessayez dans un instant.", isError: true);
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task OnCreatedAsync(ServiceDto created)
+    {
+        _adding = false;
+        _selectedId = created.Id;
+        _toast.Show($"« {created.Name} » est ajouté. Le premier contrôle part dans quelques secondes.");
+        await LoadAsync();
+    }
+
+    private async Task OnChangedAsync(string message)
+    {
+        _selectedId = null;
+        _toast.Show(message);
+        await LoadAsync();
+    }
+
+    private async Task ResendAsync()
+    {
+        _resending = true;
+        var result = await Api.ResendVerificationAsync(CancellationToken.None);
+        _resending = false;
+        if (result.Status == ApiStatus.Unauthorized)
+        {
+            EndSession();
+            return;
+        }
+
+        _toast.Show(result.IsOk ? "Un nouveau lien vient d'être envoyé." : "Le lien n'a pas pu être envoyé. Réessayez plus tard.", isError: !result.IsOk);
+    }
+
+    private void EndSession() => Navigation.NavigateTo("/session-expired", forceLoad: true);
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+        _toast.Dispose();
+    }
+}

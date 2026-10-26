@@ -1,0 +1,11 @@
+@inject NavigationManager Navigation
+
+@* A signed-out visitor asked for a page that needs an account: send them to sign in, then bring them back. *@
+
+@code {
+    protected override void OnInitialized()
+    {
+        var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri);
+        Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(path)}", forceLoad: true);
+    }
+}

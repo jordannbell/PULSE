@@ -1,0 +1,15 @@
+@if (Errors.TryGetValue(Field, out var messages))
+{
+    foreach (var message in messages)
+    {
+        <p class="field-error" role="alert">@FrenchText.Validation(message)</p>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyDictionary<string, string[]> Errors { get; set; } = new Dictionary<string, string[]>();
+
+    [Parameter, EditorRequired]
+    public string Field { get; set; } = string.Empty;
+}

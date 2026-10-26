@@ -1,0 +1,38 @@
+<button type="button" class="row" aria-current="@(Selected ? "true" : null)" @onclick="OnSelect">
+    <span class="row-head">
+        <span class="row-name">@Service.Name</span>
+        <StatusLabel Status="Service.Status" />
+    </span>
+    <span class="row-url" title="@Service.Url">@Service.Url</span>
+    @if (Service.History is { Count: > 0 } history)
+    {
+        <UptimeStrip History="history" Compact="true" ShowLegend="false" />
+    }
+    <span class="row-foot">
+        <span>
+            @(Service.LastCheckedAt is { } at ? "Contrôlé " + Fmt.Ago(at, Now) : "Pas encore contrôlé")
+            @if (!Service.IsPublic)
+            {
+                <span class="chip chip-idle">Privé</span>
+            }
+        </span>
+        @if (Service.UptimePercent is { } uptime)
+        {
+            <span class="num">@Fmt.Percent(uptime)</span>
+        }
+    </span>
+</button>
+
+@code {
+    [Parameter, EditorRequired]
+    public ServiceDto Service { get; set; } = null!;
+
+    [Parameter]
+    public bool Selected { get; set; }
+
+    [Parameter]
+    public DateTimeOffset Now { get; set; }
+
+    [Parameter]
+    public EventCallback OnSelect { get; set; }
+}

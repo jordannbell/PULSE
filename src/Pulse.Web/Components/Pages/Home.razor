@@ -1,0 +1,118 @@
+@page "/"
+
+<PageTitle>Pulse, surveillance de disponibilité et pages de statut</PageTitle>
+
+<section class="hero">
+    <Heartbeat Overall="OverallStatus.Operational" />
+    <h1>Votre site tombe. Vous le savez en premier.</h1>
+    <p class="lead">
+        Pulse contrôle vos sites et vos API, ouvre un incident dès qu'ils ne répondent plus, vous prévient
+        par e-mail ou webhook, et publie une page de statut que vos clients peuvent consulter.
+    </p>
+    <div class="hero-actions">
+        <a class="btn" href="/signup">Créer un compte gratuit</a>
+        <a class="btn btn-quiet" href="/s/demo">Voir un exemple de page</a>
+    </div>
+    <p class="hero-note muted">Sans carte bancaire. Votre page de statut est en ligne en deux minutes.</p>
+</section>
+
+<section class="sample" aria-labelledby="sample-title">
+    <h2 id="sample-title" class="sr-only">Exemple de page de statut</h2>
+    <ul class="services">
+        @foreach (var service in Sample)
+        {
+            <li class="service">
+                <div class="service-head">
+                    <span class="service-name">@service.Name</span>
+                    <span class="service-figures">
+                        <span class="uptime">@Fmt.Percent(service.Uptime)<small>sur 90 jours</small></span>
+                        <StatusLabel Status="ServiceStatus.Up" />
+                    </span>
+                </div>
+                <UptimeStrip History="service.History" />
+            </li>
+        }
+    </ul>
+    <p class="sample-caption">Exemple de ce que voient vos clients. Survolez une barre pour lire la journée.</p>
+</section>
+
+<section class="pillars" aria-label="Ce que fait Pulse">
+    <div class="pillar">
+        <h2>Il surveille</h2>
+        <p>Une requête toutes les 30 secondes à 24 heures, avec le délai maximal et la réponse attendue que vous choisissez pour chaque service.</p>
+    </div>
+    <div class="pillar">
+        <h2>Il vous prévient</h2>
+        <p>Un e-mail ou un message sur votre outil de discussion à l'ouverture d'une panne, et un autre quand tout est rétabli. Jamais un message par contrôle.</p>
+    </div>
+    <div class="pillar">
+        <h2>Il informe vos clients</h2>
+        <p>Une page publique à votre nom avec l'état de chaque service, 90 jours d'historique et les incidents, sans jamais montrer les adresses que vous surveillez.</p>
+    </div>
+</section>
+
+<section class="plans" aria-labelledby="plans-title">
+    <h2 id="plans-title">Deux formules, gratuites pendant la bêta</h2>
+    <div class="plan-grid">
+        <div class="plan">
+            <h3>Gratuite</h3>
+            <ul>
+                <li>5 services</li>
+                <li>Un contrôle toutes les 5 minutes</li>
+                <li>Alertes par e-mail et 1 webhook</li>
+                <li>Page de statut publique</li>
+            </ul>
+        </div>
+        <div class="plan">
+            <h3>Pro</h3>
+            <ul>
+                <li>50 services</li>
+                <li>Un contrôle toutes les 30 secondes</li>
+                <li>Alertes par e-mail et 5 webhooks</li>
+                <li>Page de statut publique</li>
+            </ul>
+        </div>
+    </div>
+    <p class="muted plan-note">Aucun paiement n'est demandé pour l'instant : vous passez de l'une à l'autre depuis votre compte.</p>
+</section>
+
+<section class="steps-block" aria-labelledby="steps-title">
+    <h2 id="steps-title">Démarrer en trois étapes</h2>
+    <ol class="steps">
+        <li><strong>Créez votre compte</strong><span>Une adresse e-mail, un mot de passe, et le nom de votre page de statut.</span></li>
+        <li><strong>Ajoutez une adresse à surveiller</strong><span>Le site ou l'API, et la fréquence des contrôles. Le premier part dans quelques secondes.</span></li>
+        <li><strong>Choisissez comment être prévenu</strong><span>Un e-mail, un webhook (Slack, Discord ou le vôtre), puis partagez le lien de votre page.</span></li>
+    </ol>
+</section>
+
+<p class="about">
+    Pulse est un projet de démonstration écrit en C# et .NET 10 : interface Blazor, API ASP.NET Core,
+    base SQLite avec Entity Framework Core, comptes et isolation entre clients, tests automatiques.
+</p>
+
+@code {
+    private sealed record SampleService(string Name, double Uptime, IReadOnlyList<DayDto> History);
+
+    private static readonly IReadOnlyList<SampleService> Sample =
+    [
+        new("Site vitrine", 99.98, MakeHistory(degraded: [31], outage: [])),
+        new("API publique", 99.81, MakeHistory(degraded: [20, 78], outage: [55])),
+    ];
+
+    // An invented history for the example: mostly quiet, with a few marked days.
+    private static List<DayDto> MakeHistory(int[] degraded, int[] outage)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var days = new List<DayDto>(90);
+        for (var i = 0; i < 90; i++)
+        {
+            var date = today.AddDays(i - 89);
+            days.Add(
+                outage.Contains(i) ? new DayDto(date, DayLevel.Outage, 1, 47)
+                : degraded.Contains(i) ? new DayDto(date, DayLevel.Degraded, 1, 9)
+                : new DayDto(date, DayLevel.Operational, 0, 0));
+        }
+
+        return days;
+    }
+}

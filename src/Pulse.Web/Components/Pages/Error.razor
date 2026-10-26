@@ -1,0 +1,24 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Erreur · Pulse</PageTitle>
+
+<h1>Une erreur est survenue</h1>
+<p>La demande n'a pas pu être traitée. Réessayez dans un instant.</p>
+
+@if (ShowRequestId)
+{
+    <p class="muted">Identifiant de la requête : <code>@RequestId</code></p>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

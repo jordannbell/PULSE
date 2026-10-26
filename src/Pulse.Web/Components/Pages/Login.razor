@@ -1,0 +1,84 @@
+@page "/login"
+@inject PulseApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>Connexion, Pulse</PageTitle>
+
+<section class="auth">
+    <h1>Connexion</h1>
+    @if (Expired is not null)
+    {
+        <p class="notice notice-info" role="status">Votre session a pris fin. Reconnectez-vous pour continuer.</p>
+    }
+
+    <EditForm Model="Model" FormName="login" OnSubmit="SubmitAsync">
+        <div class="fields">
+            <div class="field">
+                <label for="email">Adresse e-mail</label>
+                <InputText id="email" type="email" @bind-Value="Model.Email" autocomplete="username" />
+            </div>
+            <div class="field">
+                <label for="password">Mot de passe</label>
+                <InputText id="password" type="password" @bind-Value="Model.Password" autocomplete="current-password" />
+            </div>
+        </div>
+
+        @if (_problem is not null)
+        {
+            <p class="notice notice-error" role="alert">@_problem</p>
+        }
+
+        <button type="submit" class="btn btn-block">Se connecter</button>
+    </EditForm>
+
+    <p class="auth-links">
+        <a href="/forgot-password">Mot de passe oublié ?</a>
+        <span>Pas encore de compte ? <a href="/signup">Créer un compte</a></span>
+    </p>
+</section>
+
+@code {
+    private string? _problem;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private LoginModel Model { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? Expired { get; set; }
+
+    protected override void OnInitialized() => Model ??= new();
+
+    private async Task SubmitAsync()
+    {
+        var result = await Api.LoginAsync(new LoginRequest(Model.Email, Model.Password), HttpContext.RequestAborted);
+        switch (result.Status)
+        {
+            case ApiStatus.Ok:
+                await ApiSession.SignInAsync(HttpContext, result.Value!);
+                Navigation.NavigateTo(ApiSession.SafeReturnUrl(ReturnUrl));
+                break;
+            case ApiStatus.Unauthorized:
+                _problem = FrenchText.Validation(ApiMessages.BadCredentials);
+                break;
+            case ApiStatus.TooManyRequests:
+                _problem = "Trop de tentatives. Patientez une minute avant de réessayer.";
+                break;
+            default:
+                _problem = "Le service ne répond pas pour le moment. Réessayez dans un instant.";
+                break;
+        }
+    }
+
+    private sealed class LoginModel
+    {
+        public string Email { get; set; } = string.Empty;
+
+        public string Password { get; set; } = string.Empty;
+    }
+}

@@ -1,0 +1,9 @@
+@using Pulse.Contracts
+
+@* A coloured dot AND a word: colour is never the only carrier of the state. *@
+<span class="state state-@Fmt.StatusCss(Status)"><span class="dot" aria-hidden="true"></span>@Fmt.StatusLabel(Status)</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public ServiceStatus Status { get; set; }
+}

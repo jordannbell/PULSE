@@ -1,0 +1,89 @@
+@* The fields of a service, shared by "add" and "edit". The address is asked only when adding: it cannot change. *@
+
+<div class="fields">
+    <div class="field">
+        <label for="@Id("name")">Nom</label>
+        <InputText id="@Id("name")" @bind-Value="Model.Name" maxlength="100" placeholder="Boutique en ligne" autocomplete="off" />
+        <FieldError Errors="Errors" Field="name" />
+    </div>
+
+    @if (AskAddress)
+    {
+        <div class="field">
+            <label for="@Id("url")">Adresse à contrôler</label>
+            <InputText id="@Id("url")" @bind-Value="Model.Url" maxlength="2048" placeholder="https://exemple.fr/sante" inputmode="url" autocomplete="off" />
+            <span class="field-hint">Une adresse publique en http ou https. Une page légère qui répond vite convient très bien.</span>
+            <FieldError Errors="Errors" Field="url" />
+        </div>
+    }
+
+    <div class="field">
+        <label for="@Id("interval")">Fréquence des contrôles</label>
+        <InputSelect id="@Id("interval")" @bind-Value="Model.IntervalSeconds">
+            @foreach (var (seconds, label) in Frequencies)
+            {
+                <option value="@seconds">@label</option>
+            }
+        </InputSelect>
+        @if (MinIntervalSeconds > 30)
+        {
+            <span class="field-hint">Votre formule permet un contrôle toutes les @Fmt.Duration(TimeSpan.FromSeconds(MinIntervalSeconds)) au plus.</span>
+        }
+
+        <FieldError Errors="Errors" Field="intervalSeconds" />
+    </div>
+
+    <label class="check-line">
+        <InputCheckbox @bind-Value="Model.IsPublic" />
+        <span>Afficher sur ma page de statut publique</span>
+    </label>
+</div>
+
+<details class="more" open="@(Errors.ContainsKey("timeoutSeconds") || Errors.ContainsKey("expectedStatusCode"))">
+    <summary>Réglages avancés</summary>
+    <div class="fields fields-2">
+        <div class="field">
+            <label for="@Id("timeout")">Délai maximal de réponse (secondes)</label>
+            <InputNumber id="@Id("timeout")" @bind-Value="Model.TimeoutSeconds" />
+            <FieldError Errors="Errors" Field="timeoutSeconds" />
+        </div>
+        <div class="field">
+            <label for="@Id("expected")">Code de réponse attendu</label>
+            <InputNumber id="@Id("expected")" @bind-Value="Model.ExpectedStatusCode" />
+            <FieldError Errors="Errors" Field="expectedStatusCode" />
+        </div>
+    </div>
+</details>
+
+<FieldError Errors="Errors" Field="service" />
+
+@code {
+    [Parameter, EditorRequired]
+    public ServiceFormModel Model { get; set; } = null!;
+
+    [Parameter]
+    public IReadOnlyDictionary<string, string[]> Errors { get; set; } = new Dictionary<string, string[]>();
+
+    [Parameter]
+    public bool AskAddress { get; set; }
+
+    /// <summary>The fastest check the plan allows: faster options are not offered.</summary>
+    [Parameter]
+    public int MinIntervalSeconds { get; set; } = 30;
+
+    /// <summary>Makes the field ids unique when two forms are on one page.</summary>
+    [Parameter]
+    public string Prefix { get; set; } = "svc";
+
+    private IEnumerable<(int Seconds, string Label)> Frequencies =>
+        new (int, string)[]
+        {
+            (30, "Toutes les 30 secondes"),
+            (60, "Toutes les minutes"),
+            (300, "Toutes les 5 minutes"),
+            (900, "Toutes les 15 minutes"),
+            (3600, "Toutes les heures"),
+        }.Where(f => f.Item1 >= MinIntervalSeconds || f.Item1 == Model.IntervalSeconds);
+
+    private string Id(string field) => $"{Prefix}-{field}";
+}

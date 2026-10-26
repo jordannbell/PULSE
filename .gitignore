@@ -1,0 +1,49 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+coverage/
+*.log
+
+## Local data and secrets
+*.db
+*.db-shm
+*.db-wal
+appsettings.Local.json
+secrets.json
+.env
+
+## Editors and OS
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+
+## AI assistants and local tooling (instructions, memory, settings, caches)
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+.claude/
+.agents/
+.codex/
+.gemini/
+.cursor/
+.cursorrules
+.cursorignore
+.windsurf/
+.windsurfrules
+.continue/
+.aider*
+.kiro/
+.roo/
+.clinerules
+.copilot/
+.github/copilot-instructions.md
+.mcp.json
+.specify/
+openspec/
+skills-lock.json

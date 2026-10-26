@@ -1,0 +1,245 @@
+@inject PulseApiClient Api
+
+<article class="panel detail" aria-labelledby="detail-title">
+    <div class="detail-head">
+        <h2 id="detail-title">@Service.Name</h2>
+        <StatusLabel Status="Service.Status" />
+    </div>
+    <p class="detail-url">@Service.Url</p>
+
+    @if (_editing)
+    {
+        <EditForm Model="_form" OnSubmit="SaveAsync" FormName="edit-service" class="edit-form">
+            <ServiceForm Model="_form" Errors="_errors" MinIntervalSeconds="MinIntervalSeconds" Prefix="edit" />
+            <div class="admin-actions">
+                <button type="submit" class="btn btn-small" disabled="@_busy">@(_busy ? "Enregistrement…" : "Enregistrer")</button>
+                <button type="button" class="btn btn-quiet btn-small" @onclick="StopEditing" disabled="@_busy">Annuler</button>
+            </div>
+        </EditForm>
+    }
+    else
+    {
+        <dl class="facts">
+            <div class="fact"><dt>Fréquence</dt><dd>@Fmt.Every(Service.IntervalSeconds)</dd></div>
+            <div class="fact"><dt>Délai maximal</dt><dd>@Fmt.Duration(TimeSpan.FromSeconds(Service.TimeoutSeconds))</dd></div>
+            <div class="fact"><dt>Code attendu</dt><dd>@Service.ExpectedStatusCode</dd></div>
+            <div class="fact"><dt>Disponibilité</dt><dd>@(Service.UptimePercent is { } u ? Fmt.Percent(u) : "Pas de mesure")</dd></div>
+            <div class="fact"><dt>Dernier contrôle</dt><dd>@(Service.LastCheckedAt is { } at ? Fmt.Ago(at, Now) : "Jamais")</dd></div>
+            <div class="fact"><dt>Page publique</dt><dd>@(Service.IsPublic ? "Affiché" : "Masqué")</dd></div>
+        </dl>
+    }
+
+    <h3>Derniers contrôles</h3>
+    @if (_checks is null)
+    {
+        <div class="skeleton" style="height: 56px" aria-hidden="true"></div>
+        <p class="sr-only" role="status">Chargement des contrôles.</p>
+    }
+    else if (_checks.Count == 0)
+    {
+        <p class="muted">Aucun contrôle pour l'instant. Le premier part dans quelques secondes.</p>
+    }
+    else
+    {
+        var chronological = _checks.Reverse().ToList();
+        // Bars are scaled to the 90th percentile, so one slow outlier (a first TLS handshake) does not flatten all the others.
+        var latencies = chronological.Where(c => c.Success).Select(c => c.LatencyMs).Order().ToList();
+        var slowest = Math.Max(1, latencies.Count == 0 ? 1 : latencies[Math.Min(latencies.Count - 1, latencies.Count * 9 / 10)]);
+        <div class="checks" role="img" aria-label="@ChecksSummary(_checks)">
+            @foreach (var check in chronological)
+            {
+                var height = check.Success ? Math.Clamp(check.LatencyMs * 100 / slowest, 12, 100) : 100;
+                <span class="check @(check.Success ? "" : "check-fail")" style="height: @(height)%" aria-hidden="true">
+                    <span class="tip" role="presentation">
+                        <b>@Fmt.ShortDateTime(check.CheckedAt)</b>@(check.Success ? $"Réponse en {check.LatencyMs} ms" : "Échec : " + FrenchText.Cause(check.Error))
+                    </span>
+                </span>
+            }
+        </div>
+        <div class="strip-legend" aria-hidden="true">
+            <span>@ChecksCount(_checks.Count)</span>
+            <span>le plus récent</span>
+        </div>
+        <table class="check-table">
+            <caption class="sr-only">Les six derniers contrôles</caption>
+            <thead><tr><th scope="col">Heure</th><th scope="col">Résultat</th><th scope="col">Délai</th></tr></thead>
+            <tbody>
+                @foreach (var check in _checks.Take(6))
+                {
+                    <tr>
+                        <td>@Fmt.TimeWithSeconds(check.CheckedAt)</td>
+                        <td>
+                            @if (check.Success)
+                            {
+                                <span class="state state-up"><span class="dot" aria-hidden="true"></span>Réussi</span>
+                            }
+                            else
+                            {
+                                <span class="state state-down" title="@FrenchText.Cause(check.Error)"><span class="dot" aria-hidden="true"></span>@(check.StatusCode is { } code ? $"Code {code}" : "Échec")</span>
+                            }
+                        </td>
+                        <td>@check.LatencyMs&nbsp;ms</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <div class="confirm">
+        @if (_confirming)
+        {
+            <p>Supprimer « @Service.Name » et tout son historique ? Cette action est définitive.</p>
+            <button type="button" class="btn btn-danger-solid btn-small" @onclick="DeleteAsync" disabled="@_busy">Oui, supprimer</button>
+            <button type="button" class="btn btn-quiet btn-small" @onclick="() => _confirming = false" disabled="@_busy">Annuler</button>
+        }
+        else
+        {
+            @if (!_editing)
+            {
+                <button type="button" class="btn btn-quiet btn-small" @onclick="StartEditing">Modifier</button>
+            }
+
+            <button type="button" class="btn btn-danger btn-small" @onclick="() => _confirming = true">Supprimer ce service</button>
+        }
+    </div>
+</article>
+
+@code {
+    private IReadOnlyList<CheckDto>? _checks;
+    private (Guid Id, DateTimeOffset? Last)? _loadedFor;
+    private ServiceFormModel _form = new();
+    private IReadOnlyDictionary<string, string[]> _errors = new Dictionary<string, string[]>();
+    private bool _confirming;
+    private bool _editing;
+    private bool _busy;
+
+    [Parameter, EditorRequired]
+    public ServiceDto Service { get; set; } = null!;
+
+    [Parameter]
+    public DateTimeOffset Now { get; set; }
+
+    /// <summary>The fastest check the plan allows.</summary>
+    [Parameter]
+    public int MinIntervalSeconds { get; set; } = 30;
+
+    /// <summary>Raised after the service was changed or deleted: the page reloads its list.</summary>
+    [Parameter]
+    public EventCallback<string> OnChanged { get; set; }
+
+    /// <summary>Raised with a message when something went wrong.</summary>
+    [Parameter]
+    public EventCallback<string> OnProblem { get; set; }
+
+    /// <summary>Raised when the API says the session is over.</summary>
+    [Parameter]
+    public EventCallback OnSessionEnded { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = (Service.Id, Service.LastCheckedAt);
+        if (_loadedFor == key)
+        {
+            return;
+        }
+
+        // A different service starts again from the loading state; a new check of the same one just refreshes.
+        if (_loadedFor?.Id != Service.Id)
+        {
+            _checks = null;
+            _confirming = false;
+            _editing = false;
+        }
+
+        _loadedFor = key;
+        var result = await Api.ListChecksAsync(Service.Id, 60, CancellationToken.None);
+        if (result.Status == ApiStatus.Unauthorized)
+        {
+            await OnSessionEnded.InvokeAsync();
+            return;
+        }
+
+        _checks = result.IsOk ? result.Value ?? [] : [];
+    }
+
+    private void StartEditing()
+    {
+        _form = ServiceFormModel.From(Service);
+        _errors = new Dictionary<string, string[]>();
+        _editing = true;
+    }
+
+    private void StopEditing() => _editing = false;
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _errors = new Dictionary<string, string[]>();
+        try
+        {
+            var request = new UpdateServiceRequest(_form.Name, _form.IntervalSeconds, _form.TimeoutSeconds, _form.ExpectedStatusCode, _form.IsPublic);
+            var result = await Api.UpdateServiceAsync(Service.Id, request, CancellationToken.None);
+            switch (result.Status)
+            {
+                case ApiStatus.Ok:
+                    _editing = false;
+                    await OnChanged.InvokeAsync($"« {_form.Name} » est enregistré.");
+                    break;
+                case ApiStatus.Invalid:
+                    _errors = result.Errors ?? _errors;
+                    break;
+                case ApiStatus.Unauthorized:
+                    await OnSessionEnded.InvokeAsync();
+                    break;
+                default:
+                    await OnProblem.InvokeAsync("L'enregistrement a échoué. Réessayez.");
+                    break;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _busy = true;
+        try
+        {
+            var result = await Api.DeleteServiceAsync(Service.Id, CancellationToken.None);
+            if (result.IsOk)
+            {
+                await OnChanged.InvokeAsync($"« {Service.Name} » est supprimé.");
+            }
+            else if (result.Status == ApiStatus.Unauthorized)
+            {
+                await OnSessionEnded.InvokeAsync();
+            }
+            else
+            {
+                _confirming = false;
+                await OnProblem.InvokeAsync("La suppression a échoué. Réessayez.");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string ChecksSummary(IReadOnlyList<CheckDto> checks)
+    {
+        var failed = checks.Count(c => !c.Success);
+        if (checks.Count == 1)
+        {
+            return failed == 0 ? "Le dernier contrôle a réussi." : "Le dernier contrôle a échoué.";
+        }
+
+        return failed == 0
+            ? $"Les {checks.Count} derniers contrôles ont tous réussi."
+            : $"Sur les {checks.Count} derniers contrôles, {failed} ont échoué.";
+    }
+
+    private static string ChecksCount(int count) => count == 1 ? "1 contrôle" : $"{count} derniers contrôles";
+}
